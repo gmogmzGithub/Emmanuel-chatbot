@@ -1,14 +1,36 @@
+# Standard library imports
+import logging
 import os
-import streamlit as st
-from io import StringIO
 import re
 import sys
-from modules.history import ChatHistory
-from modules.layout import Layout
-from modules.utils import Utilities
-from modules.sidebar import Sidebar
+from io import StringIO
 
-#To be able to update the changes made to modules in localhost (press r)
+# Third-party imports
+import streamlit as st
+from dotenv import find_dotenv, load_dotenv
+
+# Local module imports
+from utils.history import ChatHistory
+from utils.layout import Layout
+from utils.sidebar import Sidebar
+from utils.utils import Utilities
+
+
+load_dotenv(find_dotenv())
+logging_level = os.getenv('LOGGING_LEVEL') or 'INFO'
+
+# Configure logging with module name and filename
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
+
+# Create a logger for this module
+logger = logging.getLogger(__name__)
+logger.setLevel(logging_level)
+
+# Log the start of the script
+logger.info('Documents Script started')
+
+
+# To be able to update the changes made to utils in localhost (press r)
 def reload_module(module_name):
     import importlib
     import sys
@@ -16,20 +38,27 @@ def reload_module(module_name):
         importlib.reload(sys.modules[module_name])
     return sys.modules[module_name]
 
-history_module = reload_module('modules.history')
-layout_module = reload_module('modules.layout')
-utils_module = reload_module('modules.utils')
-sidebar_module = reload_module('modules.sidebar')
+
+# Log the reloading of utils
+logger.debug('Reloading utils')
+
+history_module = reload_module('utils.history')
+layout_module = reload_module('utils.layout')
+utils_module = reload_module('utils.utils')
+sidebar_module = reload_module('utils.sidebar')
 
 ChatHistory = history_module.ChatHistory
 Layout = layout_module.Layout
 Utilities = utils_module.Utilities
 Sidebar = sidebar_module.Sidebar
 
-st.set_page_config(layout="wide", page_icon="💬", page_title="Robby | Chat-Bot 🤖")
+st.set_page_config(layout="wide", page_icon="💬", page_title="Your Friendly Chat-Bot 🤖")
 
 # Instantiate the main components
 layout, sidebar, utils = Layout(), Sidebar(), Utilities()
+
+# Log the instantiation of the main components
+logger.debug('Main components instantiated')
 
 layout.show_header("PDF, TXT, CSV")
 
@@ -43,6 +72,8 @@ else:
     uploaded_file = utils.handle_upload(["pdf", "txt", "csv"])
 
     if uploaded_file:
+        # Log the uploaded file
+        logger.debug(f'Uploaded file: {uploaded_file}')
 
         # Configure the sidebar
         sidebar.show_options()
@@ -50,19 +81,33 @@ else:
 
         # Initialize chat history
         history = ChatHistory()
+
+        # Log the initialization of chat history
+        logger.debug('Chat history initialized')
+
         try:
             chatbot = utils.setup_chatbot(
                 uploaded_file, st.session_state["model"], st.session_state["temperature"]
             )
+
+            # Log the setup of the chatbot
+            logger.debug('Chatbot setup completed')
+
             st.session_state["chatbot"] = chatbot
 
             if st.session_state["ready"]:
+                # Log the readiness of the session
+                logger.debug('Session is ready')
+
                 # Create containers for chat responses and user prompts
                 response_container, prompt_container = st.container(), st.container()
 
                 with prompt_container:
                     # Display the prompt form
                     is_ready, user_input = layout.prompt_form()
+
+                    # Log the user input
+                    logger.debug(f'User input: {user_input}')
 
                     # Initialize the chat history
                     history.initialize(uploaded_file)
@@ -89,12 +134,18 @@ else:
                         cleaned_thoughts = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', thoughts)
                         cleaned_thoughts = re.sub(r'\[1m>', '', cleaned_thoughts)
 
-                        # Display the agent's thoughts
-                        with st.expander("Display the agent's thoughts"):
-                            st.write(cleaned_thoughts)
-
                 history.generate_messages(response_container)
         except Exception as e:
-            st.error(f"Error: {str(e)}")
+            # Log any exceptions that occurred
+            logger.error(f'Error occurred: {str(e)}', exc_info=True)
+            st.error(
+                f"Error: We're having trouble reading the file you uploaded. {str(e)} Please ensure the file "
+                f"meets the following criteria:\n\n "
+                "- It is not password protected or encrypted.\n" 
+                "- The text in the file can be highlighted and copied (this often isn't the case if the file was "
+                "scanned).\n "
+                "- It is not primarily composed of images.\n\n"
+                "Please try uploading another file.")
 
-
+# Log the end of the script
+logger.info('Documents Script ended')

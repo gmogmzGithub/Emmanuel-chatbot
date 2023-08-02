@@ -53,10 +53,6 @@ class PandasAgent :
         cleaned_thoughts = re.sub(r'\[1m>', '', cleaned_thoughts)
         return cleaned_thoughts
 
-    def display_agent_thoughts(self,cleaned_thoughts):
-        with st.expander("Display the agent's thoughts"):
-            st.write(cleaned_thoughts)
-
     def update_chat_history(self,query, result):
         st.session_state.chat_history.append(("user", query))
         st.session_state.chat_history.append(("agent", result))
