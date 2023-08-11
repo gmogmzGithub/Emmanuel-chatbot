@@ -22,6 +22,8 @@ from utils.sidebar import Sidebar
 from utils.utils import Utilities
 from streamlit_chat import message
 
+from payment import PaymentHandler
+
 
 load_dotenv(find_dotenv())
 logging_level = os.getenv('LOGGING_LEVEL') or 'INFO'
@@ -60,109 +62,113 @@ if not user_api_key:
     layout.show_api_key_missing()
 
 else:
-    os.environ["OPENAI_API_KEY"] = user_api_key
+    payment_handler = PaymentHandler()
 
-    script_docs = []
+    num_pkl_files = payment_handler.count_pkl_files()
+    if num_pkl_files >= 3:
+        payment_handler.display_payment_button()
+    else:
+        os.environ["OPENAI_API_KEY"] = user_api_key
 
-    def get_youtube_id(url):
-        video_id = None
-        match = re.search(r"(?<=v=)[^&#]+", url)
-        if match:
-            video_id = match.group()
-        else:
-            match = re.search(r"(?<=youtu.be/)[^&#]+", url)
+        script_docs = []
+
+        def get_youtube_id(url):
+            video_id = None
+            match = re.search(r"(?<=v=)[^&#]+", url)
             if match:
                 video_id = match.group()
-        return video_id
+            else:
+                match = re.search(r"(?<=youtu.be/)[^&#]+", url)
+                if match:
+                    video_id = match.group()
+            return video_id
 
+        video_url = st.text_input(placeholder="Enter Youtube Video URL", label_visibility="hidden", label=" ")
+        if video_url:
+            video_id = get_youtube_id(video_url)
 
-    video_url = st.text_input(placeholder="Enter Youtube Video URL", label_visibility="hidden", label=" ")
+            if video_id != "":
+                # Log the video ID
+                logger.debug(f'Video ID: {video_id}')
+
+                t = YouTubeTranscriptApi.get_transcript(video_id, languages=(
+                'en', 'fr', 'es', 'zh-cn', 'hi', 'ar', 'bn', 'ru', 'pt', 'sw'))
+                finalString = ""
+                for item in t:
+                    text = item['text']
+                    finalString += text + " "
+
+                text_splitter = CharacterTextSplitter()
+                chunks = text_splitter.split_text(finalString)
+
+                summary_chain = load_summarize_chain(OpenAI(temperature=0),
+                                                     chain_type="map_reduce", verbose=False)
+
+                summarize_document_chain = AnalyzeDocumentChain(combine_docs_chain=summary_chain)
+
+                answer = summarize_document_chain.run(chunks)
+
+                st.subheader(answer)
+
     if video_url:
         video_id = get_youtube_id(video_url)
 
         if video_id != "":
-            # Log the video ID
-            logger.debug(f'Video ID: {video_id}')
+            # Define the iframe code with the desired width, height, and autoplay enabled
+            iframe_code = f"""
+            <div style="text-align: center;">
+                <iframe width="560" height="315" src="https://www.youtube.com/embed/{video_id}?autoplay=1" 
+                frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; 
+                    picture-in-picture" allowfullscreen></iframe> </div> """
 
-            t = YouTubeTranscriptApi.get_transcript(video_id, languages=(
-            'en', 'fr', 'es', 'zh-cn', 'hi', 'ar', 'bn', 'ru', 'pt', 'sw'))
-            finalString = ""
-            for item in t:
-                text = item['text']
-                finalString += text + " "
+            # Embed the iframe code using Streamlit's Markdown component
+            st.markdown(iframe_code, unsafe_allow_html=True)
+            embeds = Embedder()
+            vectors = embeds.getVideoEmbeds(chunks, video_id)  # You may need to adjust this method for chunks
 
-            text_splitter = CharacterTextSplitter()
-            chunks = text_splitter.split_text(finalString)
+            chain = ConversationalRetrievalChain.from_llm(llm=ChatOpenAI(temperature=0.0,
+                                                                         model_name='gpt-3.5-turbo',
+                                                                         openai_api_key=user_api_key),
+                                                          retriever=vectors.as_retriever(),
+                                                          verbose=False)  # Add this line
 
-            summary_chain = load_summarize_chain(OpenAI(temperature=0),
-                                                 chain_type="map_reduce", verbose=False)
+            def conversational_chat(query):
 
-            summarize_document_chain = AnalyzeDocumentChain(combine_docs_chain=summary_chain)
+                result = chain({"question": query, "chat_history": st.session_state['history']})
+                st.session_state['history'].append((query, result["answer"]))
 
-            answer = summarize_document_chain.run(chunks)
+                return result["answer"]
 
-            st.subheader(answer)
+            if 'history' not in st.session_state:
+                st.session_state['history'] = []
 
-if video_url:
-    video_id = get_youtube_id(video_url)
+            if 'generated' not in st.session_state:
+                st.session_state['generated'] = ["Hello ! Ask me anything about the video 🤗"]
 
-    if video_id != "":
-        # Define the iframe code with the desired width, height, and autoplay enabled
-        iframe_code = f"""
-        <div style="text-align: center;">
-            <iframe width="560" height="315" src="https://www.youtube.com/embed/{video_id}?autoplay=1" 
-            frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; 
-                picture-in-picture" allowfullscreen></iframe> </div> """
+            if 'past' not in st.session_state:
+                st.session_state['past'] = ["Hey ! 👋"]
 
-        # Embed the iframe code using Streamlit's Markdown component
-        st.markdown(iframe_code, unsafe_allow_html=True)
-        embeds = Embedder()
-        vectors = embeds.getVideoEmbeds(chunks, video_id)  # You may need to adjust this method for chunks
+            # container for the chat history
+            response_container = st.container()
+            # container for the user's text input
+            container = st.container()
 
-        chain = ConversationalRetrievalChain.from_llm(llm=ChatOpenAI(temperature=0.0,
-                                                                     model_name='gpt-3.5-turbo',
-                                                                     openai_api_key=user_api_key),
-                                                      retriever=vectors.as_retriever(),
-                                                      verbose=False)  # Add this line
+            with container:
+                with st.form(key='my_form', clear_on_submit=True):
+                    user_input = st.text_input("Chat:", placeholder="Talk about your csv data here (:", key='input')
+                    submit_button = st.form_submit_button(label='Send')
 
-        def conversational_chat(query):
+                if submit_button and user_input:
+                    output = conversational_chat(user_input)
 
-            result = chain({"question": query, "chat_history": st.session_state['history']})
-            st.session_state['history'].append((query, result["answer"]))
+                    st.session_state['past'].append(user_input)
+                    st.session_state['generated'].append(output)
 
-            return result["answer"]
-
-
-        if 'history' not in st.session_state:
-            st.session_state['history'] = []
-
-        if 'generated' not in st.session_state:
-            st.session_state['generated'] = ["Hello ! Ask me anything about the video 🤗"]
-
-        if 'past' not in st.session_state:
-            st.session_state['past'] = ["Hey ! 👋"]
-
-        # container for the chat history
-        response_container = st.container()
-        # container for the user's text input
-        container = st.container()
-
-        with container:
-            with st.form(key='my_form', clear_on_submit=True):
-                user_input = st.text_input("Chat:", placeholder="Talk about your csv data here (:", key='input')
-                submit_button = st.form_submit_button(label='Send')
-
-            if submit_button and user_input:
-                output = conversational_chat(user_input)
-
-                st.session_state['past'].append(user_input)
-                st.session_state['generated'].append(output)
-
-        if st.session_state['generated']:
-            with response_container:
-                for i in range(len(st.session_state['generated'])):
-                    message(st.session_state["past"][i], is_user=True, key=str(i) + '_user', avatar_style="fun-emoji")
-                    message(st.session_state["generated"][i], key=str(i), avatar_style="bottts")
+            if st.session_state['generated']:
+                with response_container:
+                    for i in range(len(st.session_state['generated'])):
+                        message(st.session_state["past"][i], is_user=True, key=str(i) + '_user', avatar_style="fun-emoji")
+                        message(st.session_state["generated"][i], key=str(i), avatar_style="bottts")
 
 # Log the end of the script
 logger.info('YouTube Script ended')

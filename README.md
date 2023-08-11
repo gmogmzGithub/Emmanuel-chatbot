@@ -20,9 +20,13 @@ Launch the chat service locally :
 
 `streamlit run src/Home.py`
 
+#### With Docker
+`docker-compose up --build -d`
+
 #### That's it! The service is now up and running locally. 🤗
+
+### Access: http://localhost:8501
 
 ## Contributing 🙌
 If you want to contribute to this project, please open an issue, submit a pull request or contact me at barbot.yvann@gmail.com (:
-
 

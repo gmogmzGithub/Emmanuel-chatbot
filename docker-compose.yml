@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  emma:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: emma:latest # custom image name
+    ports:
+      - "8501:8501" # Streamlit port
+      - "5001:5001" # Flask port
+    volumes:
+      - ./src:/app/src  # Mount the code directory
+    container_name: emma
+    depends_on:
+      - Authenticator
+
+  Authenticator:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    container_name: auth_db
+
+volumes:
+  mongodb-data:
